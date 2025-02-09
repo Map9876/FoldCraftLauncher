@@ -39,6 +39,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -166,6 +167,12 @@ public final class MultiMCModpackInstallTask extends Task<Void> {
     public void execute() throws Exception {
         Version version = repository.readVersionJson(name);
 
+        // 动态获取路径
+        String gameDirectory = repository.getRunDirectory(name).getAbsolutePath();
+        String javaAgentPath = getJavaAgentPathFromInstanceConfig(gameDirectory);
+        String packwizTomlUrl = getPackwizTomlUrlFromInstanceConfig(gameDirectory);
+        String javaAgentArgument = "-javaagent:" + javaAgentPath + "=" + packwizTomlUrl;
+
         try (FileSystem fs = CompressingUtils.readonly(zipFile.toPath()).setAutoDetectEncoding(true).build()) {
             Path root = MultiMCModpackProvider.getRootPath(fs.getPath("/"));
             Path patches = root.resolve("patches");
@@ -182,6 +189,9 @@ public final class MultiMCModpackInstallTask extends Task<Void> {
                                 arguments.add("--tweakClass");
                                 arguments.add(arg);
                             }
+
+                            // 添加 -javaagent 参数
+                            arguments.add(javaAgentArgument);
 
                             Version patch = new Version(multiMCPatch.getName(), multiMCPatch.getVersion(), 1, new Arguments().addGameArguments(arguments), multiMCPatch.getMainClass(), multiMCPatch.getLibraries());
                             version = version.addPatch(patch);
@@ -201,4 +211,36 @@ public final class MultiMCModpackInstallTask extends Task<Void> {
 
         dependencies.add(repository.saveAsync(version));
     }
-}
+
+    /**
+     * 从 instance.cfg 获取 pack.toml URL 的方法
+     */
+    private String getPackwizTomlUrlFromInstanceConfig(String gameDirectory) throws IOException {
+        Path instanceConfigPath = Paths.get(gameDirectory, "instance.cfg");
+        List<String> lines = Files.readAllLines(instanceConfigPath);
+        for (String line : lines) {
+            if (line.startsWith("JvmArgs=")) {
+                String jvmArgs = line.substring(line.indexOf('=') + 1);
+                String[] args = jvmArgs.split("=");
+                return args[1];
+            }
+        }
+        throw new IllegalStateException("pack.toml URL not found in instance.cfg");
+    }
+
+    /**
+     * 从 instance.cfg 获取 packwiz-installer-bootstrap.jar 的路径
+     */
+    private String getJavaAgentPathFromInstanceConfig(String gameDirectory) throws IOException {
+        Path instanceConfigPath = Paths.get(gameDirectory, "instance.cfg");
+        List<String> lines = Files.readAllLines(instanceConfigPath);
+        for (String line : lines) {
+            if (line.startsWith("JvmArgs=")) {
+                String jvmArgs = line.substring(line.indexOf('=') + 1);
+                String[] args = jvmArgs.split("=");
+                return gameDirectory + "/" + args[0].split(":")[1];
+            }
+        }
+        throw new IllegalStateException("packwiz-installer-bootstrap.jar path not found in instance.cfg");
+    }
+        }
